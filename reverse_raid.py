@@ -21,9 +21,14 @@ def maak_standaard_configuratie():
     }
     return standaard_config
 
+def get_config_bestand_pad():
+    """Bepaal het pad naar het configuratiebestand in dezelfde map als het script."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, 'reverseraid.yml')
+
 def laad_configuratie():
     """Laad de configuratie uit het YAML-bestand of maak een nieuw bestand aan als het niet bestaat."""
-    config_bestand = 'reverseraid.yml'
+    config_bestand = get_config_bestand_pad()
     
     # Controleer of het configuratiebestand bestaat
     if not os.path.exists(config_bestand):
@@ -38,7 +43,7 @@ def laad_configuratie():
             print(f"Fout bij het aanmaken van het configuratiebestand: {e}")
             sys.exit(1)
             
-        return config
+        return config, False  # Geef aan dat dit een nieuw config bestand is
     
     # Laad de configuratie
     try:
@@ -84,7 +89,7 @@ def laad_configuratie():
             with open(config_bestand, 'w') as f:
                 yaml.dump(config, f, default_flow_style=False)
                 
-        return config
+        return config, True  # Geef aan dat dit een bestaand config bestand is
     except Exception as e:
         print(f"Fout bij het laden van de configuratie: {e}")
         sys.exit(1)
@@ -113,14 +118,14 @@ def vraag_en_update_aantal_mappen(config):
                     config['source_paths'].extend([''] * (nieuw_aantal - len(config['source_paths'])))
                 
                 # Sla de gewijzigde configuratie op
-                with open('reverseraid.yml', 'w') as f:
+                with open(get_config_bestand_pad(), 'w') as f:
                     yaml.dump(config, f, default_flow_style=False)
                 print(f"Aantal bronmappen bijgewerkt naar {nieuw_aantal}.")
         else:
             # Als er geen invoer is, zorg ervoor dat het aantal_mappen veld overeenkomt met het aantal paden
             if huidige_aantal != len(config['source_paths']):
                 config['aantal_mappen'] = len(config['source_paths'])
-                with open('reverseraid.yml', 'w') as f:
+                with open(get_config_bestand_pad(), 'w') as f:
                     yaml.dump(config, f, default_flow_style=False)
     except ValueError:
         print("Ongeldige invoer. Het aantal blijft ongewijzigd.")
@@ -145,7 +150,7 @@ def vraag_en_update_leeftijd(config):
                 config['minimum_leeftijd_uren'] = nieuwe_leeftijd
                 
                 # Sla de gewijzigde configuratie op
-                with open('reverseraid.yml', 'w') as f:
+                with open(get_config_bestand_pad(), 'w') as f:
                     yaml.dump(config, f, default_flow_style=False)
                 print(f"Minimale leeftijd bijgewerkt naar {nieuwe_leeftijd} uur.")
     except ValueError:
@@ -171,7 +176,7 @@ def vraag_en_update_interval(config):
                 config['uitvoer_interval_minuten'] = nieuw_interval
                 
                 # Sla de gewijzigde configuratie op
-                with open('reverseraid.yml', 'w') as f:
+                with open(get_config_bestand_pad(), 'w') as f:
                     yaml.dump(config, f, default_flow_style=False)
                 print(f"Uitvoeringsinterval bijgewerkt naar {nieuw_interval} minuten.")
     except ValueError:
@@ -197,7 +202,7 @@ def vraag_en_update_console_wissen_interval(config):
                 config['console_wissen_interval_uren'] = nieuw_interval
                 
                 # Sla de gewijzigde configuratie op
-                with open('reverseraid.yml', 'w') as f:
+                with open(get_config_bestand_pad(), 'w') as f:
                     yaml.dump(config, f, default_flow_style=False)
                 print(f"Console wissen interval bijgewerkt naar {nieuw_interval} uur.")
     except ValueError:
@@ -218,19 +223,19 @@ def vraag_en_update_discord_webhook(config):
             if nieuwe_webhook.lower() == 'x':
                 config['discord_webhook_url'] = ''
                 print("Discord webhook verwijderd.")
-                with open('reverseraid.yml', 'w') as f:
+                with open(get_config_bestand_pad(), 'w') as f:
                     yaml.dump(config, f, default_flow_style=False)
             elif nieuwe_webhook.strip():
                 config['discord_webhook_url'] = nieuwe_webhook
                 print("Discord webhook bijgewerkt.")
-                with open('reverseraid.yml', 'w') as f:
+                with open(get_config_bestand_pad(), 'w') as f:
                     yaml.dump(config, f, default_flow_style=False)
         else:
             nieuwe_webhook = input("Discord webhook URL? (Laat leeg om over te slaan): ")
             if nieuwe_webhook.strip():
                 config['discord_webhook_url'] = nieuwe_webhook
                 print("Discord webhook ingesteld.")
-                with open('reverseraid.yml', 'w') as f:
+                with open(get_config_bestand_pad(), 'w') as f:
                     yaml.dump(config, f, default_flow_style=False)
                 
                 # Test de webhook
@@ -262,7 +267,7 @@ def vraag_en_update_paden(config):
     # Update het configuratiebestand als er wijzigingen zijn
     if gewijzigd:
         try:
-            with open('reverseraid.yml', 'w') as f:
+            with open(get_config_bestand_pad(), 'w') as f:
                 yaml.dump(config, f, default_flow_style=False)
             print("Configuratie succesvol bijgewerkt.")
         except Exception as e:
@@ -414,25 +419,38 @@ def verwerk_bestanden():
     print("========================\n")
     
     # Laad configuratie
-    config = laad_configuratie()
+    config, bestaand_config = laad_configuratie()
     
-    # Vraag hoeveel mappen de gebruiker wil configureren
-    config = vraag_en_update_aantal_mappen(config)
-    
-    # Vraag de minimale leeftijd van bestanden
-    config = vraag_en_update_leeftijd(config)
-    
-    # Vraag het interval tussen uitvoeringen
-    config = vraag_en_update_interval(config)
-    
-    # Vraag het interval voor het wissen van de console
-    config = vraag_en_update_console_wissen_interval(config)
-    
-    # Vraag de Discord webhook URL
-    config = vraag_en_update_discord_webhook(config)
-    
-    # Vraag om ontbrekende paden
-    config = vraag_en_update_paden(config)
+    # Als het een nieuw config bestand is of er ontbreken verplichte waarden, vraag dan om gebruikersinvoer
+    if not bestaand_config:
+        # Vraag hoeveel mappen de gebruiker wil configureren
+        config = vraag_en_update_aantal_mappen(config)
+        
+        # Vraag de minimale leeftijd van bestanden
+        config = vraag_en_update_leeftijd(config)
+        
+        # Vraag het interval tussen uitvoeringen
+        config = vraag_en_update_interval(config)
+        
+        # Vraag het interval voor het wissen van de console
+        config = vraag_en_update_console_wissen_interval(config)
+        
+        # Vraag de Discord webhook URL
+        config = vraag_en_update_discord_webhook(config)
+        
+        # Vraag om ontbrekende paden
+        config = vraag_en_update_paden(config)
+    else:
+        # Controleer of er ontbrekende paden zijn bij een bestaand configuratiebestand
+        ontbrekende_paden = False
+        for pad in config['source_paths']:
+            if not pad:
+                ontbrekende_paden = True
+                break
+                
+        if not config['destination_path'] or ontbrekende_paden:
+            print("Er ontbreken nog verplichte paden in de configuratie.")
+            config = vraag_en_update_paden(config)
     
     # Valideer paden zonder om bevestiging te vragen
     if not valideer_paden(config):
@@ -481,7 +499,7 @@ def main():
             time.sleep(interval_minuten * 60)
             
             # Werk de configuratie bij voor het geval deze is gewijzigd
-            config = laad_configuratie()
+            config, _ = laad_configuratie()
             interval_minuten = config.get('uitvoer_interval_minuten', 10)
             console_wissen_interval_uren = config.get('console_wissen_interval_uren', 6)
             
