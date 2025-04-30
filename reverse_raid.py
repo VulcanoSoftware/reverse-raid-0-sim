@@ -308,8 +308,9 @@ def verstuur_discord_bericht(webhook_url, bericht):
         print(f"Fout bij versturen Discord bericht: {e}")
         return False
 
-def logboek_bericht(config, bericht, console_output=True):
-    """Verstuur een bericht naar het logboek (console en Discord)."""
+def logboek_bericht(config, bericht, console_output=True, belangrijk=True):
+    """Verstuur een bericht naar het logboek (console en Discord).
+    Param belangrijk: Alleen belangrijk=True berichten worden naar Discord gestuurd"""
     # Voeg tijdstempel toe
     tijdstempel = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     volledig_bericht = f"[{tijdstempel}] {bericht}"
@@ -318,9 +319,9 @@ def logboek_bericht(config, bericht, console_output=True):
     if console_output:
         print(volledig_bericht)
     
-    # Verstuur naar Discord als de webhook is geconfigureerd
+    # Verstuur naar Discord als de webhook is geconfigureerd en het bericht belangrijk is
     discord_webhook_url = config.get('discord_webhook_url', '')
-    if discord_webhook_url:
+    if discord_webhook_url and belangrijk:
         verstuur_discord_bericht(discord_webhook_url, volledig_bericht)
 
 def verplaats_bestanden(config):
@@ -342,15 +343,16 @@ def verplaats_bestanden(config):
     totaal_verplaatst = 0
     totaal_overgeslagen_te_nieuw = 0
     
-    logboek_bericht(config, f"Begin met verplaatsen van bestanden (alleen bestanden ouder dan {minimum_leeftijd} uur, vóór {tijdsgrens_datetime.strftime('%Y-%m-%d %H:%M:%S')})...")
+    logboek_bericht(config, f"Begin met verplaatsen van bestanden (alleen bestanden ouder dan {minimum_leeftijd} uur)...")
     
     # Loop door alle bronmappen
     for i, bronmap in enumerate(config['source_paths']):
         if not os.path.isdir(bronmap):
-            logboek_bericht(config, f"Overslaan van bronmap {i+1}: Map bestaat niet of is geen map.")
+            logboek_bericht(config, f"Overslaan van bronmap {i+1}: Map bestaat niet of is geen map.", belangrijk=True)
             continue
         
-        logboek_bericht(config, f"Verwerken van bronmap {i+1}: {bronmap}")
+        bestanden_in_map = 0
+        verplaatst_in_map = 0
         
         # Loop door alle bestanden in de bronmap
         bestanden = [f for f in os.listdir(bronmap) if os.path.isfile(os.path.join(bronmap, f))]
@@ -365,27 +367,37 @@ def verplaats_bestanden(config):
             
             # Alleen verwerken als het bestand ouder is dan de minimale leeftijd
             if bestand_leeftijd_uren < minimum_leeftijd:
-                logboek_bericht(config, f"  Overslaan: {bestand} is te nieuw (leeftijd: {bestand_leeftijd_uren:.1f} uur).")
+                logboek_bericht(config, f"  Overslaan: {bestand} is te nieuw (leeftijd: {bestand_leeftijd_uren:.1f} uur).", belangrijk=False)
                 totaal_overgeslagen_te_nieuw += 1
                 continue
                 
             totaal_bestanden += 1
+            bestanden_in_map += 1
             
             # Controleer of het bestand al bestaat in de doelmap
             if os.path.exists(doel_pad):
-                logboek_bericht(config, f"  Overslaan: {bestand} bestaat al in de doelmap.")
+                logboek_bericht(config, f"  Overslaan: {bestand} bestaat al in de doelmap.", belangrijk=False)
                 continue
             
             try:
                 # Verplaats het bestand
                 shutil.move(bron_pad, doel_pad)
-                logboek_bericht(config, f"  Verplaatst: {bestand} (leeftijd: {bestand_leeftijd_uren:.1f} uur)")
+                logboek_bericht(config, f"  Verplaatst: {bestand}", belangrijk=False)
                 totaal_verplaatst += 1
+                verplaatst_in_map += 1
             except Exception as e:
-                logboek_bericht(config, f"  Fout bij verplaatsen van {bestand}: {e}")
+                logboek_bericht(config, f"  Fout bij verplaatsen van {bestand}: {e}", belangrijk=True)
+        
+        # Toon samenvatting per map alleen als er bestanden zijn verplaatst
+        if bestanden_in_map > 0:
+            logboek_bericht(config, f"Map {i+1}: {verplaatst_in_map} van {bestanden_in_map} bestanden verplaatst uit {bronmap}", belangrijk=(verplaatst_in_map > 0))
     
-    resultaat_bericht = f"Verplaatsen voltooid:\n- {totaal_verplaatst} van {totaal_bestanden} bestanden verplaatst naar {doelmap}\n- {totaal_overgeslagen_te_nieuw} bestanden overgeslagen omdat ze jonger zijn dan {minimum_leeftijd} uur"
-    logboek_bericht(config, resultaat_bericht)
+    # Alleen een resultaatbericht sturen als er daadwerkelijk bestanden zijn verplaatst
+    if totaal_verplaatst > 0 or totaal_bestanden > 0:
+        resultaat_bericht = f"Verplaatsing voltooid: {totaal_verplaatst} van {totaal_bestanden} bestanden verplaatst naar {doelmap}"
+        logboek_bericht(config, resultaat_bericht, belangrijk=True)
+    else:
+        logboek_bericht(config, "Geen bestanden verplaatst in deze cyclus", belangrijk=False)
 
 def wis_console():
     """Wis de console op basis van het besturingssysteem."""
@@ -422,12 +434,9 @@ def verwerk_bestanden():
     # Vraag om ontbrekende paden
     config = vraag_en_update_paden(config)
     
-    # Valideer paden
+    # Valideer paden zonder om bevestiging te vragen
     if not valideer_paden(config):
-        antwoord = input("Wilt u doorgaan ondanks de waarschuwingen? (j/n): ")
-        if antwoord.lower() not in ['j', 'ja', 'y', 'yes']:
-            print("Operatie geannuleerd.")
-            sys.exit(0)
+        print("Doorgaan ondanks waarschuwingen...")
     
     return config
 
@@ -442,13 +451,11 @@ def main():
     discord_webhook_url = config.get('discord_webhook_url', '')
     
     discord_status = "ingeschakeld" if discord_webhook_url else "uitgeschakeld"
-    logboek_bericht(config, f"Programma draait in een lus met een interval van {interval_minuten} minuten.")
+    logboek_bericht(config, f"Programma draait met een interval van {interval_minuten} minuten. Discord notificaties: {discord_status}.")
     if console_wissen_interval_uren > 0:
-        logboek_bericht(config, f"De console wordt elke {console_wissen_interval_uren} uur gewist.")
-    else:
-        logboek_bericht(config, "Het automatisch wissen van de console is uitgeschakeld.")
-    logboek_bericht(config, f"Discord webhook notificaties zijn {discord_status}.")
-    logboek_bericht(config, "Druk Ctrl+C om het programma te stoppen.\n")
+        logboek_bericht(config, f"De console wordt elke {console_wissen_interval_uren} uur gewist.", belangrijk=False)
+    
+    logboek_bericht(config, "Druk Ctrl+C om het programma te stoppen.\n", belangrijk=False)
     
     # Bijhouden wanneer de console voor het laatst is gewist
     laatste_console_wis = datetime.now()
@@ -460,19 +467,15 @@ def main():
             if console_wissen_interval_uren > 0 and (huidige_tijd - laatste_console_wis).total_seconds() >= (console_wissen_interval_uren * 3600):
                 wis_console()
                 laatste_console_wis = huidige_tijd
-                logboek_bericht(config, f"Console gewist op {laatste_console_wis.strftime('%Y-%m-%d %H:%M:%S')}")
-                logboek_bericht(config, "Reverse RAID 0 Simulator - Voortgang")
-                logboek_bericht(config, "================================\n")
-            
-            # Tijdstip van de volgende uitvoering berekenen
-            volgende_uitvoering = datetime.now() + timedelta(minutes=interval_minuten)
+                logboek_bericht(config, "Console gewist", belangrijk=False)
+                logboek_bericht(config, "Reverse RAID 0 Simulator", belangrijk=False)
             
             # Verplaats bestanden
             verplaats_bestanden(config)
             
             # Toon wanneer de volgende uitvoering is
-            logboek_bericht(config, f"Volgende uitvoering om: {volgende_uitvoering.strftime('%Y-%m-%d %H:%M:%S')}")
-            logboek_bericht(config, "Wachten...")
+            volgende_uitvoering = datetime.now() + timedelta(minutes=interval_minuten)
+            logboek_bericht(config, f"Volgende run: {volgende_uitvoering.strftime('%H:%M:%S')}", belangrijk=False)
             
             # Wacht tot het tijd is voor de volgende uitvoering
             time.sleep(interval_minuten * 60)
@@ -481,11 +484,6 @@ def main():
             config = laad_configuratie()
             interval_minuten = config.get('uitvoer_interval_minuten', 10)
             console_wissen_interval_uren = config.get('console_wissen_interval_uren', 6)
-            
-            scheidingslijn = "=" * 50
-            logboek_bericht(config, f"\n{scheidingslijn}")
-            logboek_bericht(config, f"Nieuwe uitvoering gestart om: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            logboek_bericht(config, f"{scheidingslijn}\n")
             
     except KeyboardInterrupt:
         logboek_bericht(config, "Programma gestopt door gebruiker.")
